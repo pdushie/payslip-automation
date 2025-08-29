@@ -1,4 +1,3 @@
-
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
@@ -7,6 +6,7 @@ from selenium.webdriver.chrome.options import Options
 import time
 import os
 import logging
+import json
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -16,7 +16,6 @@ logging.basicConfig(filename='download_log.txt', level=logging.INFO,
 
 # Load environment variables
 load_dotenv()
-
 EMPLOYEE_ID = os.getenv("GOG_EMPLOYEE_ID")
 PASSWORD = os.getenv("GOG_PASSWORD")
 
@@ -26,7 +25,8 @@ os.makedirs(download_dir, exist_ok=True)
 
 # Setup Chrome options
 options = Options()
-options.add_argument("--headless")
+# Show browser window for CAPTCHA solving
+# options.add_argument("--headless")  # Disabled for manual interaction
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
 options.add_experimental_option("prefs", {
@@ -40,16 +40,47 @@ options.add_experimental_option("prefs", {
 service = Service()
 driver = webdriver.Chrome(service=service, options=options)
 
-try:
-    # Go to login page
+cookies_file = "gogpayslip_cookies.json"
+
+def load_cookies():
+    if os.path.exists(cookies_file):
+        with open(cookies_file, "r") as f:
+            cookies = json.load(f)
+        driver.get("https://www.gogpayslip.com/")
+        for cookie in cookies:
+            driver.add_cookie(cookie)
+        driver.get("https://www.gogpayslip.com/mypayslip")
+        time.sleep(2)
+        # Check if login was successful
+        if "My Payslip" in driver.page_source:
+            logging.info("Logged in using saved cookies.")
+            return True
+    return False
+
+def manual_login():
     driver.get("https://www.gogpayslip.com/")
     time.sleep(2)
-
-    # Fill in login form
     driver.find_element(By.ID, "employeeNumber").send_keys(EMPLOYEE_ID)
     driver.find_element(By.ID, "password").send_keys(PASSWORD)
+    input("🛑 Please solve the CAPTCHA in the browser window, then press Enter to continue...")
     driver.find_element(By.ID, "loginButton").click()
     time.sleep(3)
+    if "My Payslip" in driver.page_source:
+        with open(cookies_file, "w") as f:
+            json.dump(driver.get_cookies(), f)
+        logging.info("Manual login successful. Cookies saved.")
+        return True
+    else:
+        logging.error("Manual login failed.")
+        return False
+
+try:
+    logged_in = load_cookies()
+    if not logged_in:
+        logged_in = manual_login()
+
+    if not logged_in:
+        raise Exception("Unable to log in.")
 
     # Navigate to payslip section
     driver.find_element(By.LINK_TEXT, "My Payslip").click()
